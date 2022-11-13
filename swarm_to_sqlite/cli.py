@@ -39,7 +39,17 @@ def validate_since(ctx, param, value):
     help="Look for checkins since 1w/2d/3h ago",
 )
 @click.option("-s", "--silent", is_flag=True, help="Don't show progress bar")
-def cli(db_path, token, load, save, since, silent):
+@click.option(
+    "--photos_path",
+    type=click.Path(dir_okay=True, writable=True, resolve_path=True),
+    help="Save photos to the folder on disk"
+)
+@click.option(
+    "--photos_prefix",
+    type=str,
+    help="Prefix for photo URL (without traling slash) for a custom web-server",
+)
+def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix):
     "Save Swarm checkins to a SQLite database"
     if token and load:
         raise click.ClickException("Provide either --load or --token")
@@ -57,9 +67,11 @@ def cli(db_path, token, load, save, since, silent):
         checkin_count = len(checkins)
     db = sqlite_utils.Database(db_path)
     saved = []
+    if photos_path and not os.path.exists(photos_path):
+        os.makedirs(photos_path)
     if silent:
         for checkin in checkins:
-            save_checkin(checkin, db)
+            save_checkin(checkin, db, photos_path)
             if save:
                 saved.append(checkin)
     else:
@@ -70,13 +82,13 @@ def cli(db_path, token, load, save, since, silent):
             ),
         ) as bar:
             for checkin in checkins:
-                save_checkin(checkin, db)
+                save_checkin(checkin, db, photos_path)
                 bar.update(1)
                 if save:
                     saved.append(checkin)
     if not db["events"].exists():
         db["events"].create({ "id": str, "name": str}, pk="id")
     ensure_foreign_keys(db)
-    create_views(db)
+    create_views(db, photos_prefix)
     if save:
         json.dump(saved, save)

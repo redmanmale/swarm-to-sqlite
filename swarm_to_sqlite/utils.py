@@ -1,10 +1,12 @@
 import datetime
 import time
 import requests
+import os
+import urllib.request
 from sqlite_utils.db import AlterError, ForeignKey
 
 
-def save_checkin(checkin, db):
+def save_checkin(checkin, db, photos_path):
     # Create copy that we can modify
     checkin = dict(checkin)
     if "venue" in checkin:
@@ -93,6 +95,9 @@ def save_checkin(checkin, db):
         photo["checkin_id"] = checkin["id"]
         photo["user"] = user["id"]
         photos_table.insert(photo, replace=True, alter=True)
+        if photos_path and not os.path.exists(os.path.join(photos_path, photo["suffix"][1:])):
+            urllib.request.urlretrieve(photo["prefix"] + 'original' + photo["suffix"],
+                os.path.join(photos_path, photo["suffix"][1:]))
     # Handle posts
     posts_table = db.table("posts", pk="id")
     for post in posts:
@@ -148,7 +153,8 @@ def ensure_foreign_keys(db):
                 pass
 
 
-def create_views(db):
+def create_views(db, photos_prefix):
+    photo_url = "'" + photos_prefix + "'" if photos_prefix else "photos.prefix || 'original'"
     for name, sql in (
         (
             "venue_details",
@@ -180,7 +186,7 @@ select
     shout,
     createdBy,
     events.name as event_name,
-    group_concat((photos.prefix || 'original' || photos.suffix), CHAR(10)) as photo_links
+    group_concat((""" + photo_url + """ || photos.suffix), CHAR(10)) as photo_links
 from checkins
     join venues on checkins.venue = venues.id
     left join events on checkins.event = events.id
