@@ -177,14 +177,14 @@ group by venues.id
             """
 select
     checkins.id,
-    checkins.created,
+    strftime('%Y-%m-%dT%H:%M:%S', checkins.createdAt, 'unixepoch') as created,
     venues.id as venue_id,
     venues.name as venue_name,
     venues.latitude,
     venues.longitude,
     group_concat(distinct categories.name) as venue_categories,
-    shout,
-    createdBy,
+    checkins.shout,
+    checkins.createdBy,
     events.name as event_name,
     group_concat((""" + photo_url + """ || photos.suffix), CHAR(10)) as photo_links
 from checkins
@@ -199,7 +199,7 @@ order by checkins.createdAt desc
         ),
     ):
         try:
-            db.create_view(name, sql)
+            db.create_view(name, sql, replace=True)
         except Exception:
             pass
 
