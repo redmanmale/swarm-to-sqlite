@@ -6,7 +6,9 @@ import urllib.request
 from sqlite_utils.db import AlterError, ForeignKey
 
 
-def save_checkin(checkin, db, photos_path):
+def save_checkin(checkin, db, photos_path, friends_history):
+    if friends_history:
+        checkin = dict(checkin["checkin"])
     # Create copy that we can modify
     checkin = dict(checkin)
     if "venue" in checkin:
@@ -51,9 +53,8 @@ def save_checkin(checkin, db, photos_path):
     checkin["created"] = datetime.datetime.utcfromtimestamp(
         checkin["createdAt"]
     ).isoformat()
-    checkin["source"] = (
-        db["sources"].lookup(checkin["source"]) if "source" in checkin else None
-    )
+    source = checkin["source"] if "source" in checkin else {"name": "unknown"}
+    checkin["source"] = db["sources"].lookup(source)
     users_with = checkin.pop("with", None) or []
     users_likes = []
     for group in checkin["likes"]["groups"]:
@@ -66,7 +67,13 @@ def save_checkin(checkin, db, photos_path):
         cleanup_user(created_by_user)
         db["users"].insert(created_by_user, pk="id", replace=True, alter=True)
         checkin["createdBy"] = created_by_user["id"]
-    checkin["comments_count"] = checkin.pop("comments")["count"]
+    if checkin.get("comments"):
+        checkin["comments_count"] = checkin.pop("comments")["count"]
+    if checkin.get("user"):
+        user = checkin.pop("user")
+        cleanup_user(user)
+        db["users"].insert(user, pk="id", replace=True, alter=True)
+        checkin["user"] = user["id"]
     # Actually save the checkin
     checkins_table = db["checkins"].insert(
         checkin,
@@ -88,7 +95,8 @@ def save_checkin(checkin, db, photos_path):
         photo["created"] = datetime.datetime.utcfromtimestamp(
             photo["createdAt"]
         ).isoformat()
-        photo["source"] = db["sources"].lookup(photo["source"])
+        source = photo["source"] if "source" in photo else {"name": "unknown"}
+        photo["source"] = db["sources"].lookup(source)
         user = photo.pop("user")
         cleanup_user(user)
         db["users"].insert(user, pk="id", replace=True, alter=True)
@@ -186,13 +194,15 @@ select
     checkins.shout,
     checkins.createdBy,
     events.name as event_name,
-    group_concat((""" + photo_url + """ || photos.suffix), CHAR(10)) as photo_links
+    group_concat((""" + photo_url + """ || photos.suffix), CHAR(10)) as photo_links,
+    users.firstName as user
 from checkins
     join venues on checkins.venue = venues.id
     left join events on checkins.event = events.id
     join categories_venues on venues.id = categories_venues.venues_id
     join categories on categories.id = categories_venues.categories_id
     left join photos on checkins.id = photos.checkin_id
+    left join users on checkins.user = users.id
 group by checkins.id
 order by checkins.createdAt desc
         """,
@@ -204,10 +214,10 @@ order by checkins.createdAt desc
             pass
 
 
-def fetch_all_checkins(token, count_first=False, since_delta=None):
+def fetch_all_checkins(token, friends_history, count_first=False, since_delta=None):
     # Generator that yields all checkins using the provided OAuth token
     # If count_first is True it first yields the total checkins count
-    before_timestamp = None
+    before = None
     params = {
         "oauth_token": token,
         "v": "20190101",
@@ -218,16 +228,39 @@ def fetch_all_checkins(token, count_first=False, since_delta=None):
         params["afterTimestamp"] = int(time.time() - since_delta)
     first = True
     while True:
-        if before_timestamp is not None:
-            params["beforeTimestamp"] = before_timestamp
-        url = "https://api.foursquare.com/v2/users/self/checkins"
+        if before is not None:
+            if friends_history:
+                params["beforeMarker"] = before
+            else:
+                params["beforeTimestamp"] = before
+        if friends_history:
+            url = "https://api.foursquare.com/v2/activities/recent"
+        else:
+            url = "https://api.foursquare.com/v2/users/self/checkins"
         data = requests.get(url, params).json()
         if first:
             first = False
             if count_first:
-                yield data["response"]["checkins"]["count"]
-        if not data.get("response", {}).get("checkins", {}).get("items"):
-            break
-        for item in data["response"]["checkins"]["items"]:
-            yield item
-        before_timestamp = item["createdAt"]
+                if friends_history:
+                    if not data.get("response", {}).get("activities", {}).get("count"):
+                        yield 0
+                    else:
+                        yield data["response"]["activities"]["count"]
+                else:
+                    yield data["response"]["checkins"]["count"]
+        if friends_history:
+            if not data.get("response", {}).get("activities", {}).get("items"):
+                break
+        else:
+            if not data.get("response", {}).get("checkins", {}).get("items"):
+                break
+        if friends_history:
+            for item in data["response"]["activities"]["items"]:
+                yield item
+        else:
+            for item in data["response"]["checkins"]["items"]:
+                yield item
+        if friends_history:
+            before = data["response"]["activities"]["trailingMarker"]
+        else:
+            before = item["createdAt"]

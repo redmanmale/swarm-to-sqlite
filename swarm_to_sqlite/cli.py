@@ -3,8 +3,8 @@ import os
 import json
 import re
 import sqlite_utils
-from .utils import save_checkin, ensure_foreign_keys, create_views, fetch_all_checkins
-
+#from .utils import save_checkin, ensure_foreign_keys, create_views, fetch_all_checkins
+from swarm_to_sqlite.utils import fetch_all_checkins, save_checkin, ensure_foreign_keys, create_views
 
 since_re = re.compile("^(\d+)(w|h|d)$")
 
@@ -47,9 +47,14 @@ def validate_since(ctx, param, value):
 @click.option(
     "--photos_prefix",
     type=str,
-    help="Prefix for photo URL (without traling slash) for a custom web-server",
+    help="Prefix for photo URL (without traling slash) for a custom web-server"
 )
-def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix):
+@click.option(
+    "--friends_history",
+    is_flag=True,
+    help="Load friends' history instead of self"
+)
+def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix, friends_history):
     "Save Swarm checkins to a SQLite database"
     if token and load:
         raise click.ClickException("Provide either --load or --token")
@@ -60,7 +65,7 @@ def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix):
         )
 
     if token:
-        checkins = fetch_all_checkins(token, count_first=True, since_delta=since)
+        checkins = fetch_all_checkins(token, friends_history, count_first=True, since_delta=since)
         checkin_count = next(checkins)
     else:
         checkins = json.load(load)
@@ -71,7 +76,7 @@ def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix):
         os.makedirs(photos_path)
     if silent:
         for checkin in checkins:
-            save_checkin(checkin, db, photos_path)
+            save_checkin(checkin, db, photos_path, friends_history)
             if save:
                 saved.append(checkin)
     else:
@@ -82,7 +87,7 @@ def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix):
             ),
         ) as bar:
             for checkin in checkins:
-                save_checkin(checkin, db, photos_path)
+                save_checkin(checkin, db, photos_path, friends_history)
                 bar.update(1)
                 if save:
                     saved.append(checkin)
