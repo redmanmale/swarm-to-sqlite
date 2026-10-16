@@ -3,8 +3,7 @@ import os
 import json
 import re
 import sqlite_utils
-#from .utils import save_checkin, ensure_foreign_keys, create_views, fetch_all_checkins
-from swarm_to_sqlite.utils import fetch_all_checkins, save_checkin, ensure_foreign_keys, create_views
+from .utils import save_checkin, ensure_foreign_keys, create_views, fetch_all_checkins
 
 since_re = re.compile("^(\d+)(w|h|d)$")
 
@@ -52,7 +51,7 @@ def validate_since(ctx, param, value):
 @click.option(
     "--friends_history",
     is_flag=True,
-    help="Load friends' history instead of self"
+    help="Load each friend's full checkin history instead of self (limit with --since)",
 )
 def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix, friends_history):
     "Save Swarm checkins to a SQLite database"

@@ -8,15 +8,15 @@ import pathlib
 
 def load_checkin():
     json_path = pathlib.Path(__file__).parent / "checkin.json"
-    return json.load(open(json_path, "r"))
+    return json.load(open(json_path, "r", encoding="utf-8"))
 
 
 @pytest.fixture(scope="session")
 def converted():
     db = sqlite_utils.Database(":memory:")
-    utils.save_checkin(load_checkin(), db)
+    utils.save_checkin(load_checkin(), db, photos_path=None, friends_history=False)
     utils.ensure_foreign_keys(db)
-    utils.create_views(db)
+    utils.create_views(db, photos_prefix=None)
     return db
 
 
@@ -197,6 +197,7 @@ def test_photos(converted):
             "height": 1440,
             "visibility": "public",
             "created": "2018-07-01T02:48:19",
+            "checkin_id": "592b2cfe09e28339ac543fde",
             "user": "15889193",
         },
         {
@@ -209,6 +210,7 @@ def test_photos(converted):
             "height": 1440,
             "visibility": "public",
             "created": "2018-07-01T02:50:35",
+            "checkin_id": "592b2cfe09e28339ac543fde",
             "user": "15889193",
         },
         {
@@ -221,6 +223,7 @@ def test_photos(converted):
             "height": 1440,
             "visibility": "public",
             "created": "2018-07-01T02:50:37",
+            "checkin_id": "592b2cfe09e28339ac543fde",
             "user": "15889193",
         },
     ] == photos
@@ -258,7 +261,7 @@ def test_checkin_with_no_event():
     # If no event in checkin, event column should be None
     del checkin["event"]
     db = sqlite_utils.Database(":memory:")
-    utils.save_checkin(checkin, db)
+    utils.save_checkin(checkin, db, photos_path=None, friends_history=False)
     assert 1 == db["checkins"].count
     row = list(db["checkins"].rows)[0]
     assert row["event"] is None
@@ -266,20 +269,28 @@ def test_checkin_with_no_event():
 
 def test_view(converted):
     assert {"checkin_details", "venue_details"} == set(converted.view_names())
-    assert [
-        {
-            "id": "592b2cfe09e28339ac543fde",
-            "created": "2017-05-28T20:03:10",
-            "venue_id": "453774dcf964a520bd3b1fe3",
-            "venue_name": "Restaurant Name",
-            "latitude": 38.456,
-            "longitude": -122.345,
-            "venue_categories": "Category Name",
-            "shout": "7th wedding anniversary — with Natalie",
-            "createdBy": None,
-            "event_name": "A movie",
-        }
-    ] == list(converted["checkin_details"].rows)
+    rows = list(converted["checkin_details"].rows)
+    assert 1 == len(rows)
+    row = rows[0]
+    expected_photos = {
+        "https://fastly.4sqi.net/img/general/original/15889193_ptDsf3Go3egIPU6WhwC4lIsEQLpW5SXxY3J1YyTY7Wc.jpg",
+        "https://fastly.4sqi.net/img/general/original/15889193_GrExrA5SoKhYBK6VhZ0g97Zy8qcEdqLpuUCJSTxzaWI.jpg",
+        "https://fastly.4sqi.net/img/general/original/15889193__9cPZDE4Y1dhNgrqueMSFYnv20k4u1hHiqPxw5m3JOc.jpg",
+    }
+    assert expected_photos == set(row.pop("photo_links").split("\n"))
+    assert {
+        "id": "592b2cfe09e28339ac543fde",
+        "created": "2017-05-28T20:03:10",
+        "venue_id": "453774dcf964a520bd3b1fe3",
+        "venue_name": "Restaurant Name",
+        "latitude": 38.456,
+        "longitude": -122.345,
+        "venue_categories": "Category Name",
+        "shout": "7th wedding anniversary — with Natalie",
+        "createdBy": None,
+        "event_name": "A movie",
+        "user": None,
+    } == row
     assert [
         {
             "first": "2017-05-28T20:03:10",

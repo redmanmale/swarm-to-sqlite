@@ -36,6 +36,10 @@ To retrieve just checkins within the past X hours, days or weeks, use the `--sin
 
 Use `2w` for two weeks, `10h` for ten hours, `3d` for three days.
 
+To import checkins from your friends instead of your own history, use `--friends_history`. Combined with `--since` this downloads each friend's checkins within that time window; without `--since` it downloads their full available history:
+
+    $ swarm-to-sqlite checkins.db --token=XXX --friends_history --since=4w
+
 In addition to saving the checkins to a database, you can also write them to a JSON file using the `--save` option:
 
     $ swarm-to-sqlite checkins.db --save=checkins.json

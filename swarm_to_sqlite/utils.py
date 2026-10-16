@@ -3,10 +3,14 @@ import time
 import requests
 import os
 import urllib.request
+import click
 from sqlite_utils.db import AlterError, ForeignKey
 
+API_BASE = "https://api.foursquare.com/v2"
+API_VERSION = "20190101"
 
-def save_checkin(checkin, db, photos_path, friends_history):
+
+def save_checkin(checkin, db, photos_path=None, friends_history=False):
     if friends_history:
         checkin = dict(checkin["checkin"])
     # Create copy that we can modify
@@ -74,6 +78,8 @@ def save_checkin(checkin, db, photos_path, friends_history):
         cleanup_user(user)
         db["users"].insert(user, pk="id", replace=True, alter=True)
         checkin["user"] = user["id"]
+    else:
+        checkin["user"] = None
     # Actually save the checkin
     checkins_table = db["checkins"].insert(
         checkin,
@@ -161,7 +167,7 @@ def ensure_foreign_keys(db):
                 pass
 
 
-def create_views(db, photos_prefix):
+def create_views(db, photos_prefix=None):
     photo_url = "'" + photos_prefix + "'" if photos_prefix else "photos.prefix || 'original'"
     for name, sql in (
         (
@@ -214,13 +220,108 @@ order by checkins.createdAt desc
             pass
 
 
+def _api_get(token, path, **params):
+    params = dict(params)
+    params.setdefault("oauth_token", token)
+    params.setdefault("v", API_VERSION)
+    response = requests.get(API_BASE + path, params=params)
+    response.raise_for_status()
+    return response.json()
+
+
+def _friends_items(friends_block):
+    """Normalize /users/self/friends payload (flat items or grouped)."""
+    if not friends_block:
+        return []
+    items = friends_block.get("items")
+    if items:
+        return items
+    grouped = []
+    for group in friends_block.get("groups") or []:
+        grouped.extend(group.get("items") or [])
+    return grouped
+
+
+def fetch_friends(token):
+    """Return (friends, estimated_checkin_count) from /users/self/friends."""
+    friends = []
+    estimated = 0
+    offset = 0
+    limit = 500
+    while True:
+        data = _api_get(token, "/users/self/friends", limit=limit, offset=offset)
+        friends_block = data.get("response", {}).get("friends") or {}
+        items = _friends_items(friends_block)
+        if not items:
+            break
+        for user in items:
+            friends.append(user)
+            checkins = user.get("checkins") or {}
+            if isinstance(checkins, dict) and checkins.get("count"):
+                estimated += int(checkins["count"])
+        count = friends_block.get("count")
+        offset += len(items)
+        if count is not None and offset >= count:
+            break
+        if len(items) < limit:
+            break
+    return friends, estimated
+
+
+def fetch_user_activities(token, user_id, since_delta=None):
+    """Yield activity items that contain a checkin for the given user."""
+    params = {
+        "limit": 100,
+        "attachmentsLimit": 5,
+    }
+    if since_delta:
+        params["afterTimestamp"] = int(time.time() - since_delta)
+    before_marker = None
+    while True:
+        page_params = dict(params)
+        if before_marker is not None:
+            page_params["beforeMarker"] = before_marker
+        data = _api_get(token, "/users/{}/activities".format(user_id), **page_params)
+        activities = data.get("response", {}).get("activities") or {}
+        items = activities.get("items") or []
+        if not items:
+            break
+        for item in items:
+            if item.get("checkin"):
+                yield item
+        trailing = activities.get("trailingMarker")
+        more_data = activities.get("moreData")
+        if not trailing or more_data is False:
+            break
+        before_marker = trailing
+
+
 def fetch_all_checkins(token, friends_history, count_first=False, since_delta=None):
     # Generator that yields all checkins using the provided OAuth token
     # If count_first is True it first yields the total checkins count
-    before = None
+    if friends_history:
+        friends, estimated = fetch_friends(token)
+        if count_first:
+            yield estimated
+        for friend in friends:
+            user_id = friend.get("id")
+            if not user_id:
+                continue
+            try:
+                for item in fetch_user_activities(token, user_id, since_delta=since_delta):
+                    yield item
+            except Exception as exc:
+                name = friend.get("firstName") or user_id
+                click.echo(
+                    "Warning: failed to load checkins for {}: {}".format(name, exc),
+                    err=True,
+                )
+        return
+
+    before_timestamp = None
     params = {
         "oauth_token": token,
-        "v": "20190101",
+        "v": API_VERSION,
         "sort": "newestfirst",
         "limit": "250",
     }
@@ -228,39 +329,15 @@ def fetch_all_checkins(token, friends_history, count_first=False, since_delta=No
         params["afterTimestamp"] = int(time.time() - since_delta)
     first = True
     while True:
-        if before is not None:
-            if friends_history:
-                params["beforeMarker"] = before
-            else:
-                params["beforeTimestamp"] = before
-        if friends_history:
-            url = "https://api.foursquare.com/v2/activities/recent"
-        else:
-            url = "https://api.foursquare.com/v2/users/self/checkins"
-        data = requests.get(url, params).json()
+        if before_timestamp is not None:
+            params["beforeTimestamp"] = before_timestamp
+        data = requests.get(API_BASE + "/users/self/checkins", params).json()
         if first:
             first = False
             if count_first:
-                if friends_history:
-                    if not data.get("response", {}).get("activities", {}).get("count"):
-                        yield 0
-                    else:
-                        yield data["response"]["activities"]["count"]
-                else:
-                    yield data["response"]["checkins"]["count"]
-        if friends_history:
-            if not data.get("response", {}).get("activities", {}).get("items"):
-                break
-        else:
-            if not data.get("response", {}).get("checkins", {}).get("items"):
-                break
-        if friends_history:
-            for item in data["response"]["activities"]["items"]:
-                yield item
-        else:
-            for item in data["response"]["checkins"]["items"]:
-                yield item
-        if friends_history:
-            before = data["response"]["activities"]["trailingMarker"]
-        else:
-            before = item["createdAt"]
+                yield data["response"]["checkins"]["count"]
+        if not data.get("response", {}).get("checkins", {}).get("items"):
+            break
+        for item in data["response"]["checkins"]["items"]:
+            yield item
+        before_timestamp = item["createdAt"]
