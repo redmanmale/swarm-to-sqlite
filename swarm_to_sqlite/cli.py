@@ -49,11 +49,11 @@ def validate_since(ctx, param, value):
     help="Prefix for photo URL (without traling slash) for a custom web-server"
 )
 @click.option(
-    "--friends_history",
+    "--friends",
     is_flag=True,
     help="Load each friend's full checkin history instead of self (limit with --since)",
 )
-def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix, friends_history):
+def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix, friends):
     "Save Swarm checkins to a SQLite database"
     if token and load:
         raise click.ClickException("Provide either --load or --token")
@@ -64,7 +64,7 @@ def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix, f
         )
 
     if token:
-        checkins = fetch_all_checkins(token, friends_history, count_first=True, since_delta=since)
+        checkins = fetch_all_checkins(token, friends, count_first=True, since_delta=since)
         checkin_count = next(checkins)
     else:
         checkins = json.load(load)
@@ -75,7 +75,7 @@ def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix, f
         os.makedirs(photos_path)
     if silent:
         for checkin in checkins:
-            save_checkin(checkin, db, photos_path, friends_history)
+            save_checkin(checkin, db, photos_path, friends)
             if save:
                 saved.append(checkin)
     else:
@@ -86,7 +86,7 @@ def cli(db_path, token, load, save, since, silent, photos_path, photos_prefix, f
             ),
         ) as bar:
             for checkin in checkins:
-                save_checkin(checkin, db, photos_path, friends_history)
+                save_checkin(checkin, db, photos_path, friends)
                 bar.update(1)
                 if save:
                     saved.append(checkin)

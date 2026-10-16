@@ -14,7 +14,7 @@ def load_checkin():
 @pytest.fixture(scope="session")
 def converted():
     db = sqlite_utils.Database(":memory:")
-    utils.save_checkin(load_checkin(), db, photos_path=None, friends_history=False)
+    utils.save_checkin(load_checkin(), db, photos_path=None, friends=False)
     utils.ensure_foreign_keys(db)
     utils.create_views(db, photos_prefix=None)
     return db
@@ -261,7 +261,7 @@ def test_checkin_with_no_event():
     # If no event in checkin, event column should be None
     del checkin["event"]
     db = sqlite_utils.Database(":memory:")
-    utils.save_checkin(checkin, db, photos_path=None, friends_history=False)
+    utils.save_checkin(checkin, db, photos_path=None, friends=False)
     assert 1 == db["checkins"].count
     row = list(db["checkins"].rows)[0]
     assert row["event"] is None

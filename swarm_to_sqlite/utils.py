@@ -10,8 +10,8 @@ API_BASE = "https://api.foursquare.com/v2"
 API_VERSION = "20190101"
 
 
-def save_checkin(checkin, db, photos_path=None, friends_history=False):
-    if friends_history:
+def save_checkin(checkin, db, photos_path=None, friends=False):
+    if friends:
         checkin = dict(checkin["checkin"])
     # Create copy that we can modify
     checkin = dict(checkin)
@@ -296,14 +296,14 @@ def fetch_user_activities(token, user_id, since_delta=None):
         before_marker = trailing
 
 
-def fetch_all_checkins(token, friends_history, count_first=False, since_delta=None):
+def fetch_all_checkins(token, friends, count_first=False, since_delta=None):
     # Generator that yields all checkins using the provided OAuth token
     # If count_first is True it first yields the total checkins count
-    if friends_history:
-        friends, estimated = fetch_friends(token)
+    if friends:
+        friend_list, estimated = fetch_friends(token)
         if count_first:
             yield estimated
-        for friend in friends:
+        for friend in friend_list:
             user_id = friend.get("id")
             if not user_id:
                 continue
